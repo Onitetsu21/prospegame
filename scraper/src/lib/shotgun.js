@@ -136,11 +136,18 @@ function parseFrenchDate(times) {
 
 function firstImage(img) {
   if (!img || img.length === 0) return null;
-  const src = img.attr('src');
-  if (src && src.startsWith('http')) return src;
-  const srcset = img.attr('srcset');
-  if (srcset) return srcset.split(',')[0].trim().split(/\s+/)[0] || null;
-  return null;
+  let url = img.attr('src');
+  if (!(url && url.startsWith('http'))) {
+    const srcset = img.attr('srcset');
+    if (!srcset) return null;
+    // ⚠️ Les URLs Cloudinary contiennent des virgules (ex : "c_limit,w_384") :
+    // on ne découpe QU'aux séparateurs ", https…" du srcset, puis on prend le
+    // premier URL (sinon on tronquerait l'URL).
+    url = srcset.split(/,\s+(?=https?:\/\/)/)[0].trim().split(/\s+/)[0];
+  }
+  if (!url) return null;
+  // Cover légère et nette : on force la largeur Cloudinary à 640px.
+  return url.replace(/w_\d+/, 'w_640');
 }
 
 function absoluteUrl(url) {

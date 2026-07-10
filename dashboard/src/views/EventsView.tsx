@@ -1,11 +1,35 @@
+import { useState } from 'react';
 import type { City, Filters } from '../lib/types';
 import { getEvents } from '../lib/api';
 import { useAsync } from '../lib/useAsync';
 import { Topbar } from '../components/Topbar';
 import { Panel, StyleList, EmptyState, Loading } from '../components/ui';
-import { IconExternal, IconPin } from '../components/icons';
+import { IconExternal, IconPin, IconWave } from '../components/icons';
 import { formatDateTime, formatPrice, isFuture } from '../lib/format';
 import { downloadCsv } from '../lib/csv';
+
+// Vignette de cover (16:9). Placeholder dégradé si pas d'image / erreur de chargement.
+function Cover({ url, title }: { url: string | null; title: string }) {
+  const [broken, setBroken] = useState(false);
+  const show = url && !broken;
+  return (
+    <div className="relative w-28 h-16 rounded-lg overflow-hidden bg-card-hover border border-line shrink-0">
+      {show ? (
+        <img
+          src={url!}
+          alt={title}
+          loading="lazy"
+          className="w-full h-full object-cover"
+          onError={() => setBroken(true)}
+        />
+      ) : (
+        <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-turq-500/15 to-violet/10">
+          <IconWave className="w-5 h-5 text-turq-300/60" />
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function EventsView({ filters, setFilters, cities, styles }: {
   filters: Filters; setFilters: (f: Partial<Filters>) => void; cities: City[]; styles: string[];
@@ -46,9 +70,10 @@ export function EventsView({ filters, setFilters, cities, styles }: {
             <EmptyState title="Aucun événement" hint="Ajustez les filtres ou élargissez la fenêtre temporelle." />
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[720px]">
+              <table className="w-full min-w-[860px]">
                 <thead>
                   <tr>
+                    <th className="th w-32">Cover</th>
                     <th className="th">Événement</th>
                     <th className="th">Date</th>
                     <th className="th">Ville / Venue</th>
@@ -61,6 +86,9 @@ export function EventsView({ filters, setFilters, cities, styles }: {
                 <tbody>
                   {rows.map((e) => (
                     <tr key={e.id} className="hover:bg-card-hover/50 transition">
+                      <td className="td py-2.5">
+                        <Cover url={e.image_url} title={e.title} />
+                      </td>
                       <td className="td">
                         <div className="font-medium text-ink">{e.title}</div>
                       </td>
