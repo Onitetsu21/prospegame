@@ -1,0 +1,19 @@
+# Configuration Netlify du dashboard (à la RACINE du repo pour être détectée
+# automatiquement, sans réglage manuel du "base directory").
+#
+# base    : Netlify se place dans dashboard/ (npm y trouve package.json)
+# command : build Vite
+# publish : dossier de sortie, relatif à `base` -> dashboard/dist
+[build]
+  base = "dashboard"
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# SPA : toutes les routes renvoient vers index.html
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
