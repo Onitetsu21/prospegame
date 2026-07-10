@@ -16,6 +16,8 @@ on:
 jobs:
   scrape:
     runs-on: ubuntu-latest
+    # Les secrets/variables sont rattachés à l'environnement GitHub "Production".
+    environment: Production
     defaults:
       run:
         working-directory: scraper
