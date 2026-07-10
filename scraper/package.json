@@ -1,0 +1,17 @@
+{
+  "name": "prospegame-scraper",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Scraper + jobs (rapport, purge) pour la veille événementielle Shotgun",
+  "scripts": {
+    "scrape": "node src/scrape.js",
+    "report": "node src/report.js",
+    "purge": "node src/purge.js",
+    "seed:demo": "node src/seed-demo.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "cheerio": "^1.0.0"
+  }
+}
