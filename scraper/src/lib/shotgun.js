@@ -2,248 +2,150 @@ import * as cheerio from 'cheerio';
 import { config } from './env.js';
 
 // ============================================================================
-// Parsing des pages de listing Shotgun.
+// Parsing des pages de listing Shotgun (structure vérifiée sur le HTML rendu).
 //
-// ⚠️  ROBUSTESSE (cf. §10) : Shotgun est une app Next.js dont le HTML peut
-//     changer. Tout le couplage à la structure du site est CONCENTRÉ ICI.
-//     Trois stratégies d'extraction sont tentées dans l'ordre, de la plus
-//     robuste à la plus fragile :
-//       1. JSON-LD (<script type="application/ld+json">, @type Event/MusicEvent)
-//       2. __NEXT_DATA__ (payload d'hydratation Next.js)
-//       3. Fallback DOM (liens /events/... + heuristiques)
-//
-//     Si AUCUNE stratégie ne renvoie d'événement pour une page a priori
-//     peuplée, on lève une erreur (pas d'échec silencieux) : le run est marqué
-//     `partial` et l'incident est journalisé dans scrape_runs.errors.
+// ⚠️  ROBUSTESSE (cf. §10) : tout le couplage à la structure du site est ICI.
+//     Shotgun n'expose PAS de JSON-LD d'événements ni de __NEXT_DATA__ ; les
+//     données sont dans le DOM. Chaque événement est une <a href="/…/events/…">
+//     contenant :
+//       • titre   : <p class="line-clamp-…">
+//       • lieu    : <div class="text-muted-foreground shrink …">
+//       • date    : <time> (date FR) + <time> (heure)
+//       • prix    : élément dont le texte propre vaut "12,00 €" (ou "Gratuit")
+//       • genres  : pastilles <div class="… rounded-full …">
+//     La page ville n'affiche qu'une tranche de jours ; la pagination se fait
+//     via ?page=N (le scraper boucle sur les pages, cf. scrape.js).
 // ============================================================================
 
-// URL d'une page de listing ville (Shotgun expose /cities/<slug>).
-export function cityUrl(slug) {
-  return `${config.shotgunBase}/cities/${slug}`;
+// URL d'une page de listing ville. page=0 → URL nue ; page>=1 → ?page=N.
+export function cityUrl(slug, page = 0) {
+  const base = `${config.shotgunBase}/cities/${slug}`;
+  return page > 0 ? `${base}?page=${page}` : base;
 }
 
-// Point d'entrée : renvoie une liste d'événements normalisés pour une ville.
+const MONTHS = {
+  janv: 0, févr: 1, fevr: 1, mars: 2, avr: 3, mai: 4, juin: 5,
+  juil: 6, août: 7, aout: 7, sept: 8, oct: 9, nov: 10, déc: 11, dec: 11,
+};
+
+// Point d'entrée : renvoie la liste des événements normalisés d'une page.
 export function parseCityPage(html, citySlug) {
   const $ = cheerio.load(html);
   const byId = new Map();
-
-  const add = (ev) => {
-    if (!ev || !ev.shotgunEventId) return;
-    const prev = byId.get(ev.shotgunEventId);
-    // Fusion : on garde les champs déjà connus, on complète avec les nouveaux.
-    byId.set(ev.shotgunEventId, prev ? mergeEvent(prev, ev) : ev);
-  };
-
-  for (const ev of parseJsonLd($, citySlug)) add(ev);
-  if (byId.size === 0) for (const ev of parseNextData($, citySlug)) add(ev);
-  if (byId.size === 0) for (const ev of parseDomFallback($, citySlug)) add(ev);
-
+  $('a[href*="/events/"]').each((_, el) => {
+    const ev = parseCard($, $(el), citySlug);
+    if (ev && !byId.has(ev.shotgunEventId)) byId.set(ev.shotgunEventId, ev);
+  });
   return [...byId.values()];
 }
 
-function mergeEvent(a, b) {
+function parseCard($, a, citySlug) {
+  const href = a.attr('href') || '';
+  const m = href.match(/\/events\/([^/?#]+)/);
+  if (!m) return null;
+  const shotgunEventId = m[1]; // slug complet = clé de dédup stable
+
+  const title =
+    directText($, a.find('p[class*="line-clamp"]').first()) ||
+    a.find('img').first().attr('alt') ||
+    '';
+  if (!title) return null;
+
+  const venueName = directText($, a.find('div.text-muted-foreground.shrink').first()) || null;
+
+  // Genres : pastilles rounded-full (texte court, non vide).
+  const tags = [
+    ...new Set(
+      a.find('div[class*="rounded-full"]')
+        .map((_, t) => $(t).text().replace(/\s+/g, ' ').trim())
+        .get()
+        .filter((x) => x && x.length < 30)
+    ),
+  ];
+
+  const times = a.find('time').map((_, t) => $(t).text().trim()).get();
+  const eventDate = parseFrenchDate(times);
+
+  const priceMin = parsePrice($, a);
+  const imageUrl = firstImage(a.find('img').first());
+
   return {
-    ...a,
-    ...Object.fromEntries(Object.entries(b).filter(([, v]) => v != null && v !== '')),
-    tags: [...new Set([...(a.tags || []), ...(b.tags || [])])],
+    shotgunEventId,
+    title: title.replace(/\s+/g, ' ').trim(),
+    eventDate,
+    venueName,
+    citySlug,
+    // La page ville expose le lieu, pas l'organisateur (celui-ci est sur la
+    // fiche événement) — laissé null en V1, enrichissable ultérieurement.
+    organizerName: null,
+    organizerShotgunId: null,
+    organizerUrl: null,
+    priceMin,
+    url: absoluteUrl(href),
+    imageUrl,
+    tags,
   };
 }
 
-// ── Stratégie 1 : JSON-LD ───────────────────────────────────────────────────
-function parseJsonLd($, citySlug) {
-  const out = [];
-  $('script[type="application/ld+json"]').each((_, el) => {
-    let json;
-    try {
-      json = JSON.parse($(el).contents().text());
-    } catch {
-      return;
-    }
-    const nodes = Array.isArray(json) ? json : json['@graph'] ? json['@graph'] : [json];
-    for (const node of nodes) {
-      const type = node?.['@type'];
-      const isEvent =
-        type === 'Event' ||
-        type === 'MusicEvent' ||
-        (Array.isArray(type) && type.some((t) => /Event/i.test(t)));
-      if (!isEvent) continue;
-      out.push(normalize(
-        {
-          id: extractIdFromUrl(node.url) || node.identifier,
-          title: node.name,
-          date: node.startDate,
-          venue: node.location?.name,
-          organizerName: asOrganizerName(node.organizer),
-          organizerUrl: node.organizer?.url,
-          price: extractPrice(node.offers),
-          url: node.url,
-          image: Array.isArray(node.image) ? node.image[0] : node.image,
-          tags: extractTags(node),
-        },
-        citySlug
-      ));
-    }
-  });
-  return out.filter(Boolean);
+// Texte propre d'un élément (sans le texte de ses enfants).
+function directText($, el) {
+  if (!el || el.length === 0) return '';
+  return el.clone().children().remove().end().text().replace(/\s+/g, ' ').trim();
 }
 
-// ── Stratégie 2 : __NEXT_DATA__ ─────────────────────────────────────────────
-function parseNextData($, citySlug) {
-  const raw = $('#__NEXT_DATA__').contents().text();
-  if (!raw) return [];
-  let json;
-  try {
-    json = JSON.parse(raw);
-  } catch {
-    return [];
-  }
-  // On parcourt récursivement le payload à la recherche d'objets ressemblant
-  // à des événements (heuristique : présence d'un id + name/title + startDate).
-  const out = [];
-  const seen = new Set();
-  const walk = (node) => {
-    if (!node || typeof node !== 'object') return;
-    if (Array.isArray(node)) return node.forEach(walk);
-    const looksLikeEvent =
-      (node.name || node.title) &&
-      (node.startDate || node.startTime || node.date) &&
-      (node.id || node.slug || node.permalink);
-    if (looksLikeEvent) {
-      const key = String(node.id ?? node.slug ?? node.permalink);
-      if (!seen.has(key)) {
-        seen.add(key);
-        out.push(normalize(
-          {
-            id: node.id ?? node.slug ?? extractIdFromUrl(node.permalink),
-            title: node.name || node.title,
-            date: node.startDate || node.startTime || node.date,
-            venue: node.venue?.name || node.location?.name || node.venueName,
-            organizerName:
-              node.organizer?.name || node.creator?.name || node.promoterName,
-            organizerUrl: node.organizer?.permalink || node.organizer?.url,
-            organizerId: node.organizer?.id || node.creator?.id,
-            price: node.minPrice ?? node.priceMin ?? extractPrice(node.offers),
-            url: absoluteUrl(node.permalink || node.url),
-            image: node.image || node.cover || node.artworkUrl,
-            tags: extractTags(node),
-          },
-          citySlug
-        ));
+// Prix mini : plus petit montant "12,00 €" trouvé dans un élément dédié
+// (on lit le texte PROPRE des éléments pour éviter de coller le prix au titre).
+function parsePrice($, a) {
+  let min = null;
+  a.find('*').each((_, e) => {
+    const dt = directText($, $(e));
+    const pm = dt.match(/^(\d{1,4})[.,](\d{2})\s*€$/);
+    if (pm) {
+      const v = parseFloat(`${pm[1]}.${pm[2]}`);
+      if (min == null || v < min) min = v;
+    } else if (/^gratuit$/i.test(dt)) {
+      min = 0;
+    }
+  });
+  return min;
+}
+
+// Date FR sans année ("ven. 10 juil." + "22:00") -> ISO. L'année est inférée
+// (si la date tombe > 7 j dans le passé, on passe à l'année suivante).
+function parseFrenchDate(times) {
+  let day, month, hh = 22, mm = 0, found = false;
+  for (const t of times) {
+    const dm = t.match(/(\d{1,2})\s*([a-zàâäéèêëîïôöûüç]+)/i);
+    if (dm) {
+      const mk = dm[2].toLowerCase().replace(/\./g, '');
+      for (const k in MONTHS) {
+        if (mk.startsWith(k)) { month = MONTHS[k]; day = +dm[1]; found = true; break; }
       }
     }
-    for (const v of Object.values(node)) walk(v);
-  };
-  walk(json);
-  return out.filter(Boolean);
+    const hm = t.match(/(\d{1,2}):(\d{2})/);
+    if (hm) { hh = +hm[1]; mm = +hm[2]; }
+  }
+  if (!found) return null;
+  const now = new Date();
+  let d = new Date(now.getFullYear(), month, day, hh, mm);
+  if (d.getTime() < now.getTime() - 7 * 86400000) {
+    d = new Date(now.getFullYear() + 1, month, day, hh, mm);
+  }
+  return isNaN(d.getTime()) ? null : d.toISOString();
 }
 
-// ── Stratégie 3 : fallback DOM ──────────────────────────────────────────────
-function parseDomFallback($, citySlug) {
-  const out = [];
-  $('a[href*="/events/"]').each((_, el) => {
-    const href = $(el).attr('href') || '';
-    const id = extractIdFromUrl(href);
-    if (!id) return;
-    const card = $(el);
-    const title =
-      card.find('h2,h3,[class*="title"]').first().text().trim() ||
-      card.attr('title') ||
-      card.text().trim().slice(0, 120);
-    const venue = card.find('[class*="venue"],[class*="location"]').first().text().trim();
-    const image = card.find('img').first().attr('src');
-    const tags = card
-      .find('[class*="tag"],[class*="genre"],[class*="badge"]')
-      .map((_, t) => $(t).text().trim())
-      .get()
-      .filter(Boolean);
-    out.push(normalize(
-      { id, title, venue, image, url: absoluteUrl(href), tags },
-      citySlug
-    ));
-  });
-  return out.filter(Boolean);
-}
-
-// ── Helpers de normalisation ────────────────────────────────────────────────
-function normalize(r, citySlug) {
-  if (!r.id || !r.title) return null;
-  return {
-    shotgunEventId: String(r.id),
-    title: clean(r.title),
-    eventDate: toIso(r.date),
-    venueName: clean(r.venue) || null,
-    citySlug,
-    organizerName: clean(r.organizerName) || null,
-    organizerShotgunId: r.organizerId != null ? String(r.organizerId) : null,
-    organizerUrl: absoluteUrl(r.organizerUrl) || null,
-    priceMin: parsePriceNumber(r.price),
-    url: absoluteUrl(r.url) || null,
-    imageUrl: r.image || null,
-    tags: dedupeTags(r.tags),
-  };
-}
-
-function clean(s) {
-  return typeof s === 'string' ? s.replace(/\s+/g, ' ').trim() : s;
-}
-
-function toIso(d) {
-  if (!d) return null;
-  const t = new Date(d);
-  return isNaN(t.getTime()) ? null : t.toISOString();
-}
-
-function extractIdFromUrl(url) {
-  if (!url || typeof url !== 'string') return null;
-  // Shotgun : /events/<slug>-<id> ou /events/<id>
-  const m = url.match(/\/events\/([a-z0-9-]+)/i);
-  if (!m) return null;
-  const tail = m[1].match(/(\d+)$/);
-  return tail ? tail[1] : m[1];
+function firstImage(img) {
+  if (!img || img.length === 0) return null;
+  const src = img.attr('src');
+  if (src && src.startsWith('http')) return src;
+  const srcset = img.attr('srcset');
+  if (srcset) return srcset.split(',')[0].trim().split(/\s+/)[0] || null;
+  return null;
 }
 
 function absoluteUrl(url) {
-  if (!url || typeof url !== 'string') return null;
+  if (!url) return null;
   if (url.startsWith('http')) return url;
   if (url.startsWith('/')) return `${config.shotgunBase}${url}`;
   return url;
-}
-
-function asOrganizerName(org) {
-  if (!org) return null;
-  if (typeof org === 'string') return org;
-  if (Array.isArray(org)) return org[0]?.name || null;
-  return org.name || null;
-}
-
-function extractPrice(offers) {
-  if (!offers) return null;
-  const arr = Array.isArray(offers) ? offers : [offers];
-  const prices = arr.map((o) => parseFloat(o.price ?? o.lowPrice)).filter((n) => !isNaN(n));
-  return prices.length ? Math.min(...prices) : null;
-}
-
-function parsePriceNumber(p) {
-  if (p == null) return null;
-  const n = typeof p === 'number' ? p : parseFloat(String(p).replace(',', '.'));
-  return isNaN(n) ? null : n;
-}
-
-function extractTags(node) {
-  const raw = []
-    .concat(node.genres || [])
-    .concat(node.tags || [])
-    .concat(node.styles || [])
-    .concat(node.keywords ? String(node.keywords).split(',') : [])
-    .concat(node.genre ? [node.genre] : []);
-  return dedupeTags(raw);
-}
-
-function dedupeTags(tags) {
-  if (!Array.isArray(tags)) return [];
-  const norm = tags
-    .map((t) => (typeof t === 'string' ? t : t?.name || t?.label))
-    .filter(Boolean)
-    .map((t) => t.replace(/\s+/g, ' ').trim());
-  return [...new Set(norm)];
 }

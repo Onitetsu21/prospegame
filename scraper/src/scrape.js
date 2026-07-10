@@ -17,6 +17,9 @@ import { cityUrl, parseCityPage } from './lib/shotgun.js';
 import { fetchRenderedHtml, closeBrowser } from './lib/browser.js';
 import { config } from './lib/env.js';
 
+// Nombre max de pages parcourues par ville (garde-fou anti-boucle).
+const MAX_PAGES = parseInt(process.env.SCRAPE_MAX_PAGES || '15', 10);
+
 // Borne d'horizon : événements au-delà de N mois écartés (Shotgun ne liste que
 // l'à-venir ; on garde ce qui tombe dans la fenêtre demandée).
 const horizonLimit =
@@ -52,27 +55,46 @@ async function main() {
     );
 
     for (const city of cities) {
-      const url = cityUrl(city.shotgun_slug);
-      console.log(`[scrape] → ${city.name} (${url})`);
+      console.log(`[scrape] → ${city.name} (${cityUrl(city.shotgun_slug)})`);
       try {
-        const html = await fetchRenderedHtml(url);
-        if (config.debugDump) {
-          await writeFile(`debug-${city.shotgun_slug}.html`, html);
-          console.log(`[scrape]   (debug) HTML rendu écrit dans debug-${city.shotgun_slug}.html`);
+        // Pagination : la page ville n'affiche qu'une tranche de jours ; on
+        // boucle sur ?page=N jusqu'à épuisement / dépassement de l'horizon.
+        const collected = new Map();
+        let page = 0;
+        let firstPageEmpty = false;
+        while (page < MAX_PAGES) {
+          const html = await fetchRenderedHtml(cityUrl(city.shotgun_slug, page));
+          if (config.debugDump && page === 0) {
+            await writeFile(`debug-${city.shotgun_slug}.html`, html);
+            console.log(`[scrape]   (debug) HTML page 0 écrit dans debug-${city.shotgun_slug}.html`);
+          }
+          const parsed = parseCityPage(html, city.shotgun_slug);
+          if (parsed.length === 0) {
+            if (page === 0) firstPageEmpty = true;
+            break; // plus de contenu
+          }
+          let newCount = 0;
+          let anyWithin = false;
+          for (const ev of parsed) {
+            if (!collected.has(ev.shotgunEventId)) { collected.set(ev.shotgunEventId, ev); newCount++; }
+            if (withinHorizon(ev)) anyWithin = true;
+          }
+          console.log(`[scrape]   page ${page}: ${parsed.length} carte(s), +${newCount} nouvelle(s)`);
+          if (newCount === 0) break;      // pagination qui boucle
+          if (!anyWithin) break;          // tout au-delà de l'horizon
+          page++;
         }
 
-        const all = parseCityPage(html, city.shotgun_slug);
-        const events = all.filter(withinHorizon);
-
-        // Alerting : une page ville sans aucun événement est suspecte
-        // (challenge non résolu ou structure HTML modifiée — cf. §10).
-        if (all.length === 0) {
+        // Alerting : page 0 vide = challenge non résolu ou structure modifiée (§10).
+        if (firstPageEmpty) {
           const msg = `Aucun événement parsé pour ${city.name} — challenge non résolu ou structure HTML à vérifier ?`;
           console.warn(`[scrape] ⚠️  ${msg}`);
           errors.push({ city: city.shotgun_slug, message: msg });
           continue;
         }
 
+        const all = [...collected.values()];
+        const events = all.filter(withinHorizon);
         console.log(`[scrape]   ${events.length}/${all.length} événement(s) retenu(s) (horizon)`);
         let skippedHere = 0;
         for (const ev of events) {
