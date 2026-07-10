@@ -1,5 +1,5 @@
 import * as cheerio from 'cheerio';
-import { config, sleep } from './env.js';
+import { config } from './env.js';
 
 // ============================================================================
 // Parsing des pages de listing Shotgun.
@@ -20,22 +20,6 @@ import { config, sleep } from './env.js';
 // URL d'une page de listing ville (Shotgun expose /cities/<slug>).
 export function cityUrl(slug) {
   return `${config.shotgunBase}/cities/${slug}`;
-}
-
-export async function fetchHtml(url) {
-  const res = await fetch(url, {
-    headers: {
-      'User-Agent': config.userAgent,
-      Accept: 'text/html,application/xhtml+xml',
-      'Accept-Language': 'fr-FR,fr;q=0.9,en;q=0.8',
-    },
-  });
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status} sur ${url}`);
-  }
-  // Rate limiting : on espace les requêtes (cf. §10).
-  await sleep(config.scrapeDelayMs);
-  return res.text();
 }
 
 // Point d'entrée : renvoie une liste d'événements normalisés pour une ville.

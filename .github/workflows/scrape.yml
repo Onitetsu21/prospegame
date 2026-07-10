@@ -2,10 +2,16 @@ name: Scrape Shotgun (quotidien)
 
 # Scraping quotidien de toutes les villes actives (cf. §4 & §11).
 # Toute ville ajoutée en base est prise en compte au run suivant, sans redéploiement.
+# Le scraper utilise Chromium (Playwright) pour franchir le challenge anti-bot Vercel.
 on:
   schedule:
     - cron: '30 5 * * *' # tous les jours à 05h30 UTC
-  workflow_dispatch: {}   # déclenchement manuel possible
+  workflow_dispatch:
+    inputs:
+      debug_dump:
+        description: 'Dumper le HTML rendu (artefact) pour ajuster les sélecteurs'
+        type: boolean
+        default: false
 
 jobs:
   scrape:
@@ -19,9 +25,20 @@ jobs:
         with:
           node-version: '22'
       - run: npm ci || npm install
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
       - name: Run scraper
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          SCRAPE_DELAY_MS: '1500'
+          SCRAPE_DELAY_MS: '2500'
+          SCRAPE_HORIZON_MONTHS: '3'
+          SCRAPE_DEBUG_DUMP: ${{ inputs.debug_dump && '1' || '0' }}
         run: npm run scrape
+      - name: Upload rendered HTML (debug)
+        if: ${{ inputs.debug_dump }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: rendered-html
+          path: scraper/debug-*.html
+          if-no-files-found: ignore
