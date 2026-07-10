@@ -55,3 +55,6 @@ export const IconTag = (p: P) => (
 export const IconCheck = (p: P) => (
   <S {...p}><path d="M20 6 9 17l-5-5" /></S>
 );
+export const IconBolt = (p: P) => (
+  <S {...p}><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z" /></S>
+);

@@ -7,6 +7,13 @@ import type {
 const monthsAgoIso = (m: number) => new Date(Date.now() - m * 30 * 86400000).toISOString();
 const daysAgoIso = (d: number) => new Date(Date.now() - d * 86400000).toISOString();
 
+// Shotgun ne liste que l'à-venir : la fenêtre temporelle regarde vers le FUTUR.
+// « N mois » = événements des N prochains mois (avec 2 j de marge sur le passé
+// pour garder ce qui vient de se terminer).
+const WINDOW_GRACE_MS = 2 * 86400000;
+const windowStartIso = () => new Date(Date.now() - WINDOW_GRACE_MS).toISOString();
+const monthsAheadIso = (m: number) => new Date(Date.now() + m * 30 * 86400000).toISOString();
+
 // ─── Villes ──────────────────────────────────────────────────────────────
 export async function getCities(): Promise<City[]> {
   if (!hasSupabase) return [...mockCities];
@@ -41,9 +48,10 @@ export async function getEvents(f: Filters): Promise<EventRow[]> {
   let q = supabase!
     .from('events_enriched')
     .select('*')
-    .gte('event_date', monthsAgoIso(f.months))
-    .order('event_date', { ascending: false })
-    .limit(500);
+    .gte('event_date', windowStartIso())
+    .lte('event_date', monthsAheadIso(f.months))
+    .order('event_date', { ascending: true })
+    .limit(1000);
   if (f.citySlug) q = q.eq('city_slug', f.citySlug);
   const { data, error } = await q;
   if (error) throw error;
@@ -62,10 +70,11 @@ export async function getEvents(f: Filters): Promise<EventRow[]> {
 }
 
 function filterEventsLocal(rows: EventRow[], f: Filters): EventRow[] {
-  const since = monthsAgoIso(f.months);
+  const start = windowStartIso();
+  const end = monthsAheadIso(f.months);
   const s = f.search.toLowerCase();
   return rows
-    .filter((e) => (e.event_date ?? '') >= since)
+    .filter((e) => (e.event_date ?? '') >= start && (e.event_date ?? '') <= end)
     .filter((e) => !f.citySlug || e.city_slug === f.citySlug)
     .filter((e) => !f.style || e.styles.includes(f.style!))
     .filter(
@@ -75,7 +84,7 @@ function filterEventsLocal(rows: EventRow[], f: Filters): EventRow[] {
         (e.organizer_name ?? '').toLowerCase().includes(s) ||
         (e.venue_name ?? '').toLowerCase().includes(s)
     )
-    .sort((a, b) => (b.event_date ?? '').localeCompare(a.event_date ?? ''));
+    .sort((a, b) => (a.event_date ?? '').localeCompare(b.event_date ?? ''));
 }
 
 // ─── Organisateurs (organizer_stats) ─────────────────────────────────────
@@ -229,6 +238,15 @@ export async function setTargetStyleActive(id: string, active: boolean): Promise
   }
   const { error } = await supabase!.from('target_styles').update({ active }).eq('id', id);
   if (error) throw error;
+}
+
+// ─── Déclenchement du scrap à la demande (fonction Netlify) ──────────────
+export async function triggerScrape(): Promise<void> {
+  const res = await fetch('/.netlify/functions/trigger-scrape', { method: 'POST' });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `Erreur ${res.status}`);
+  }
 }
 
 export async function addTargetStyle(tag: string): Promise<void> {

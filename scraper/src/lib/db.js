@@ -25,6 +25,23 @@ export async function getActiveTargetStyles() {
   return (data ?? []).map((r) => r.shotgun_tag);
 }
 
+// Ensemble des shotgun_event_id déjà en base (pour ne récupérer la fiche
+// détaillée — donc l'organisateur — que des NOUVEAUX événements).
+export async function getExistingEventIds() {
+  const ids = new Set();
+  const pageSize = 1000;
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await db
+      .from('events')
+      .select('shotgun_event_id')
+      .range(from, from + pageSize - 1);
+    if (error) throw new Error(`Lecture events : ${error.message}`);
+    for (const r of data) ids.add(r.shotgun_event_id);
+    if (!data || data.length < pageSize) break;
+  }
+  return ids;
+}
+
 // Journal de run (robustesse / alerting — cf. §10)
 export async function startScrapeRun() {
   const { data, error } = await db

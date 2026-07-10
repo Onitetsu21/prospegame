@@ -15,7 +15,7 @@ export default function App() {
   const [filters, setFiltersState] = useState<Filters>({
     citySlug: null,
     style: null,
-    months: 6, // fenêtre par défaut : 6 mois (cf. §2/§6 du cahier des charges)
+    months: 3, // fenêtre par défaut : 3 prochains mois (horizon du scraper)
     search: '',
   });
   const setFilters = (patch: Partial<Filters>) => setFiltersState((f) => ({ ...f, ...patch }));

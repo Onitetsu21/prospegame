@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import type { City, Filters } from '../lib/types';
-import { getCities, addCity, setCityActive, getTargetStyles, setTargetStyleActive, addTargetStyle } from '../lib/api';
+import { getCities, addCity, setCityActive, getTargetStyles, setTargetStyleActive, addTargetStyle, triggerScrape } from '../lib/api';
 import { useAsync } from '../lib/useAsync';
 import { Topbar } from '../components/Topbar';
 import { Panel, EmptyState, Loading, Switch } from '../components/ui';
-import { IconPlus, IconPin, IconTag } from '../components/icons';
+import { IconPlus, IconPin, IconTag, IconBolt, IconCheck } from '../components/icons';
 import { formatDate } from '../lib/format';
 
 const SIX_MONTHS = 6 * 30 * 86400000;
@@ -20,11 +20,64 @@ export function CitiesView({ filters, setFilters, cities, styles, onCitiesChange
         subtitle="Gérez le périmètre de veille : villes suivies et liste blanche des styles électro"
         filters={filters} setFilters={setFilters} cities={cities} styles={styles} showFilters={false}
       />
-      <div className="p-6 grid grid-cols-1 xl:grid-cols-2 gap-6">
-        <CitiesPanel onChanged={onCitiesChanged} />
-        <TargetStylesPanel />
+      <div className="p-6 space-y-6">
+        <ScrapeNowBanner />
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <CitiesPanel onChanged={onCitiesChanged} />
+          <TargetStylesPanel />
+        </div>
       </div>
     </>
+  );
+}
+
+function ScrapeNowBanner() {
+  const [state, setState] = useState<'idle' | 'loading' | 'ok' | 'error'>('idle');
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const run = async () => {
+    setState('loading'); setMsg(null);
+    try {
+      await triggerScrape();
+      setState('ok');
+      setMsg('Scrap lancé ! Le run démarre sur GitHub Actions (quelques minutes).');
+    } catch (e) {
+      setState('error');
+      setMsg((e as Error).message);
+    }
+  };
+
+  return (
+    <div className="card p-5 flex flex-col sm:flex-row sm:items-center gap-4 justify-between">
+      <div>
+        <h2 className="text-sm font-semibold text-ink flex items-center gap-2">
+          <IconBolt className="w-4 h-4 text-turq-300" /> Lancer un scrap maintenant
+        </h2>
+        <p className="text-xs text-ink-3 mt-1 max-w-xl">
+          Après avoir ajouté une ville ou modifié la liste blanche, déclenche une collecte
+          immédiate sans attendre le run quotidien automatique.
+        </p>
+        {msg && (
+          <p className={`text-xs mt-2 ${state === 'error' ? 'text-rose' : 'text-turq-300'}`}>{msg}</p>
+        )}
+      </div>
+      <button
+        className={state === 'ok' ? 'btn-ghost text-turq-300 border-turq-500/30' : 'btn-primary'}
+        onClick={run}
+        disabled={state === 'loading'}
+      >
+        {state === 'loading' ? (
+          <>
+            <span className="w-4 h-4 rounded-full border-2 border-base border-t-transparent animate-spin" />
+            Lancement…
+          </>
+        ) : state === 'ok' ? (
+          <><IconCheck className="w-4 h-4" /> Lancé</>
+        ) : (
+          <><IconBolt className="w-4 h-4" /> Lancer un scrap</>
+        )}
+      </button>
+    </div>
   );
 }
 

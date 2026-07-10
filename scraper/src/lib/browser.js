@@ -6,18 +6,18 @@ import { config, sleep } from './env.js';
 //
 // ⚠️  Shotgun est protégé par le "Vercel Security Checkpoint" (challenge JS
 //     anti-bot). Un simple fetch renvoie HTTP 429 + une page de challenge : il
-//     FAUT un vrai navigateur qui exécute le JavaScript pour obtenir le contenu.
-//     C'est le cas "contenu chargé en JS" prévu au §7 du cahier des charges.
+//     FAUT un vrai navigateur qui exécute le JavaScript.
 //
-//     Ce module lance Chromium, ouvre la page, attend que le challenge se
-//     résolve et que les cartes d'événements apparaissent, puis renvoie le HTML
-//     rendu (que shotgun.js parse ensuite).
+//     On réutilise UN SEUL contexte navigateur pour toute la session : le
+//     cookie de challenge Vercel persiste, donc il n'est résolu qu'une fois et
+//     les pages suivantes (pagination + fiches événement) se chargent vite.
 // ============================================================================
 
 let _browser = null;
+let _ctx = null;
 
-export async function getBrowser() {
-  if (_browser) return _browser;
+async function getContext() {
+  if (_ctx) return _ctx;
   _browser = await chromium.launch({
     args: [
       '--no-sandbox',
@@ -25,18 +25,7 @@ export async function getBrowser() {
       '--disable-dev-shm-usage',
     ],
   });
-  return _browser;
-}
-
-export async function closeBrowser() {
-  if (_browser) {
-    await _browser.close();
-    _browser = null;
-  }
-}
-
-async function newContext(browser) {
-  const ctx = await browser.newContext({
+  _ctx = await _browser.newContext({
     userAgent: config.userAgent.startsWith('Mozilla')
       ? config.userAgent
       : 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 ' +
@@ -45,40 +34,45 @@ async function newContext(browser) {
     timezoneId: 'Europe/Paris',
     viewport: { width: 1366, height: 900 },
   });
-  // Réduit quelques signaux d'automatisation les plus évidents.
-  await ctx.addInitScript(() => {
+  await _ctx.addInitScript(() => {
     Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
   });
-  return ctx;
+  return _ctx;
+}
+
+export async function closeBrowser() {
+  if (_ctx) { await _ctx.close().catch(() => {}); _ctx = null; }
+  if (_browser) { await _browser.close().catch(() => {}); _browser = null; }
 }
 
 const isChallenge = (t) => /Checkpoint|Security|Just a moment|Attention Required/i.test(t || '');
 
-// Charge une URL et renvoie le HTML rendu, après résolution du challenge Vercel
-// et apparition d'au moins un lien /events/. Lève une erreur si rien n'apparaît.
-export async function fetchRenderedHtml(url) {
-  const browser = await getBrowser();
-  const ctx = await newContext(browser);
+// Charge une URL et renvoie le HTML rendu. `readySelector` = sélecteur dont la
+// présence signale que le contenu utile est chargé (et le challenge résolu).
+// `scroll` déclenche le lazy-loading (utile pour les listings, inutile pour une
+// fiche événement).
+export async function fetchRenderedHtml(
+  url,
+  { readySelector = 'a[href*="/events/"]', scroll = true } = {}
+) {
+  const ctx = await getContext();
   const page = await ctx.newPage();
   try {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
 
-    // Attente active : le challenge Vercel se résout puis RECHARGE la page.
-    // waitForSelector est résilient à la navigation ; on retente sur toute
-    // erreur (timeout OU "execution context destroyed" pendant le reload).
+    // Attente résiliente à la navigation (le challenge recharge la page).
     let ready = false;
     for (let i = 0; i < 15; i++) {
       try {
-        await page.waitForSelector('a[href*="/events/"]', { timeout: 3000, state: 'attached' });
+        await page.waitForSelector(readySelector, { timeout: 3000, state: 'attached' });
         ready = true;
         break;
       } catch {
-        // toujours en challenge ou navigation en cours -> on réessaie
+        /* challenge en cours / navigation -> on réessaie */
       }
     }
 
-    // Laisse l'hydratation se stabiliser, puis scrolle (lazy-load).
-    if (ready) {
+    if (ready && scroll) {
       await page.waitForLoadState('domcontentloaded').catch(() => {});
       for (let s = 0; s < 6; s++) {
         await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {});
@@ -91,10 +85,9 @@ export async function fetchRenderedHtml(url) {
     if (!ready && isChallenge(title)) {
       throw new Error(`Bloqué par le challenge Vercel (titre: "${title}")`);
     }
-    // Rate limiting entre deux pages (cf. §10).
-    await sleep(config.scrapeDelayMs);
+    await sleep(config.scrapeDelayMs); // rate limiting (§10)
     return html;
   } finally {
-    await ctx.close();
+    await page.close().catch(() => {});
   }
 }

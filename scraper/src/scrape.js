@@ -9,11 +9,12 @@ import { writeFile } from 'node:fs/promises';
 import {
   getActiveCities,
   getActiveTargetStyles,
+  getExistingEventIds,
   startScrapeRun,
   finishScrapeRun,
   upsertEvent,
 } from './lib/db.js';
-import { cityUrl, parseCityPage } from './lib/shotgun.js';
+import { cityUrl, parseCityPage, parseEventDetail, eventUrl } from './lib/shotgun.js';
 import { fetchRenderedHtml, closeBrowser } from './lib/browser.js';
 import { config } from './lib/env.js';
 
@@ -53,6 +54,12 @@ async function main() {
       `[scrape] ${cities.length} ville(s) active(s), ${whitelist.length} style(s) whitelisté(s), ` +
         `horizon ${config.horizonMonths || '∞'} mois.`
     );
+
+    const whitelistSet = new Set(whitelist);
+    const existingIds = await getExistingEventIds();
+    console.log(`[scrape] ${existingIds.size} événement(s) déjà en base (fiches non re-visitées).`);
+    let detailDumped = false;
+    let orgFound = 0;
 
     for (const city of cities) {
       console.log(`[scrape] → ${city.name} (${cityUrl(city.shotgun_slug)})`);
@@ -99,6 +106,36 @@ async function main() {
         let skippedHere = 0;
         for (const ev of events) {
           seen++;
+
+          // Organisateur : on ne le trouve que sur la fiche de l'événement.
+          // On ne visite que les NOUVEAUX événements électro (économie de requêtes).
+          const isNew = !existingIds.has(ev.shotgunEventId);
+          const isElectro = (ev.tags || []).some((t) => whitelistSet.has(t));
+          if (isNew && isElectro) {
+            try {
+              const durl = ev.url || eventUrl(ev.shotgunEventId);
+              const dHtml = await fetchRenderedHtml(durl, {
+                readySelector: 'script[type="application/ld+json"], h1',
+                scroll: false,
+              });
+              if (config.debugDump && !detailDumped) {
+                await writeFile('debug-event.html', dHtml);
+                detailDumped = true;
+                console.log('[scrape]   (debug) fiche événement écrite dans debug-event.html');
+              }
+              const org = parseEventDetail(dHtml);
+              if (org && org.organizerName) {
+                ev.organizerName = org.organizerName;
+                ev.organizerShotgunId = org.organizerShotgunId;
+                ev.organizerUrl = org.organizerUrl;
+                orgFound++;
+              }
+            } catch (e) {
+              // Non bloquant : l'événement sera stocké sans organisateur.
+              console.error(`[scrape]   (org) ${ev.shotgunEventId}: ${e.message}`);
+            }
+          }
+
           try {
             const res = await upsertEvent(ev);
             if (res === 'created') created++;
@@ -133,7 +170,8 @@ async function main() {
       status, events_seen: seen, events_created: created, events_updated: updated, errors,
     });
     console.log(
-      `[scrape] Terminé (${status}) — vus:${seen} créés:${created} maj:${updated} erreurs:${errors.length}`
+      `[scrape] Terminé (${status}) — vus:${seen} créés:${created} maj:${updated} ` +
+        `organisateurs:${orgFound} erreurs:${errors.length}`
     );
     await closeBrowser();
     process.exit(errors.length === 0 ? 0 : 1);
