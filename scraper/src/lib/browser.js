@@ -61,29 +61,34 @@ export async function fetchRenderedHtml(url) {
   const ctx = await newContext(browser);
   const page = await ctx.newPage();
   try {
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
 
-    // Attente active : le challenge se résout puis le contenu s'hydrate.
+    // Attente active : le challenge Vercel se résout puis RECHARGE la page.
+    // waitForSelector est résilient à la navigation ; on retente sur toute
+    // erreur (timeout OU "execution context destroyed" pendant le reload).
     let ready = false;
-    for (let i = 0; i < 12; i++) {
-      await page.waitForTimeout(2500);
-      const title = await page.title().catch(() => '');
-      if (isChallenge(title)) continue;
-      const hasEvents = await page.$('a[href*="/events/"]');
-      if (hasEvents) { ready = true; break; }
+    for (let i = 0; i < 15; i++) {
+      try {
+        await page.waitForSelector('a[href*="/events/"]', { timeout: 3000, state: 'attached' });
+        ready = true;
+        break;
+      } catch {
+        // toujours en challenge ou navigation en cours -> on réessaie
+      }
     }
 
-    // Déclenche le lazy-loading en scrollant jusqu'en bas.
+    // Laisse l'hydratation se stabiliser, puis scrolle (lazy-load).
     if (ready) {
+      await page.waitForLoadState('domcontentloaded').catch(() => {});
       for (let s = 0; s < 6; s++) {
-        await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+        await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {});
         await page.waitForTimeout(1200);
       }
     }
 
-    const html = await page.content();
+    const html = await page.content().catch(() => '');
     const title = await page.title().catch(() => '');
-    if (isChallenge(title)) {
+    if (!ready && isChallenge(title)) {
       throw new Error(`Bloqué par le challenge Vercel (titre: "${title}")`);
     }
     // Rate limiting entre deux pages (cf. §10).
