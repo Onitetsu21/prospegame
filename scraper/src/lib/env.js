@@ -3,10 +3,10 @@
 // GitHub Actions et Supabase Edge Functions injectent déjà les variables).
 
 export const config = {
-  // On nettoie l'URL : un retour à la ligne / espace / slash final collé par
-  // erreur dans la variable casse le chemin ("Invalid path specified in request URL").
-  supabaseUrl: requireEnv('SUPABASE_URL').trim().replace(/\/+$/, ''),
-  supabaseServiceKey: requireEnv('SUPABASE_SERVICE_ROLE_KEY').trim(),
+  // On nettoie l'URL : guillemets, espaces, retour à la ligne ou slash final
+  // collés par erreur cassent le chemin ("Invalid path specified in request URL").
+  supabaseUrl: clean(requireEnv('SUPABASE_URL')).replace(/\/+$/, ''),
+  supabaseServiceKey: clean(requireEnv('SUPABASE_SERVICE_ROLE_KEY')),
   scrapeDelayMs: parseInt(process.env.SCRAPE_DELAY_MS || '2500', 10),
   userAgent:
     process.env.SCRAPE_USER_AGENT ||
@@ -20,6 +20,11 @@ export const config = {
   // (récupérable comme artefact GitHub Actions pour ajuster les sélecteurs).
   debugDump: process.env.SCRAPE_DEBUG_DUMP === '1',
 };
+
+// Retire espaces/retours ligne aux extrémités et guillemets englobants.
+function clean(v) {
+  return v.trim().replace(/^['"]+|['"]+$/g, '').trim();
+}
 
 function requireEnv(name) {
   const v = process.env[name];
