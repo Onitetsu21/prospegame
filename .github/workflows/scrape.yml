@@ -29,8 +29,9 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Run scraper
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # Accepte que les valeurs soient stockées en "Secrets" OU en "Variables".
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL || vars.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY || vars.SUPABASE_SERVICE_ROLE_KEY }}
           SCRAPE_DELAY_MS: '2500'
           SCRAPE_HORIZON_MONTHS: '3'
           SCRAPE_DEBUG_DUMP: ${{ inputs.debug_dump && '1' || '0' }}
