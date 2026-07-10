@@ -74,16 +74,31 @@ async function main() {
         }
 
         console.log(`[scrape]   ${events.length}/${all.length} événement(s) retenu(s) (horizon)`);
+        let skippedHere = 0;
         for (const ev of events) {
           seen++;
           try {
             const res = await upsertEvent(ev);
             if (res === 'created') created++;
             else if (res === 'updated') updated++;
+            else if (res === 'skipped') {
+              skippedHere++;
+              // Diagnostic : afficher pourquoi (tags manquants ou hors whitelist).
+              if (skippedHere <= 8) {
+                console.log(
+                  `[scrape]   ⊘ skip "${ev.title}" — tags=[${(ev.tags || []).join(', ') || '∅'}]`
+                );
+              }
+            }
           } catch (e) {
             errors.push({ city: city.shotgun_slug, event: ev.shotgunEventId, message: e.message });
             console.error(`[scrape]   ✗ ${ev.shotgunEventId}: ${e.message}`);
           }
+        }
+        if (skippedHere > 0) {
+          console.log(
+            `[scrape]   ${skippedHere} skippé(s) (aucun tag ne matche la liste blanche électro).`
+          );
         }
       } catch (e) {
         errors.push({ city: city.shotgun_slug, message: e.message });
