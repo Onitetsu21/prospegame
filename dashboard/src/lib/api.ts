@@ -240,6 +240,15 @@ export async function setTargetStyleActive(id: string, active: boolean): Promise
   if (error) throw error;
 }
 
+// ─── Déclenchement du scrap à la demande (fonction Netlify) ──────────────
+export async function triggerScrape(): Promise<void> {
+  const res = await fetch('/.netlify/functions/trigger-scrape', { method: 'POST' });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `Erreur ${res.status}`);
+  }
+}
+
 export async function addTargetStyle(tag: string): Promise<void> {
   if (!hasSupabase) {
     MOCK_TARGET.push({ id: `t-${Date.now()}`, shotgun_tag: tag, active: true });

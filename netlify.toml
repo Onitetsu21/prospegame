@@ -12,6 +12,12 @@
 [build.environment]
   NODE_VERSION = "20"
 
+# Fonctions serverless (bouton "Lancer un scrap") — dossier relatif à `base`,
+# donc dashboard/netlify/functions.
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
 # SPA : toutes les routes renvoient vers index.html
 [[redirects]]
   from = "/*"
