@@ -149,3 +149,67 @@ function absoluteUrl(url) {
   if (url.startsWith('/')) return `${config.shotgunBase}${url}`;
   return url;
 }
+
+// ── Fiche événement : extraction de l'organisateur ──────────────────────────
+// L'organisateur (promoteur/collectif) n'est PAS sur la page de listing (qui
+// n'affiche que le lieu) — il est sur la fiche de l'événement. On tente d'abord
+// le JSON-LD (Event.organizer), puis un lien vers /organizers/.
+export function parseEventDetail(html) {
+  const $ = cheerio.load(html);
+
+  let org = fromJsonLd($);
+  if (!org) org = fromOrganizerLink($);
+  return org; // { organizerName, organizerShotgunId, organizerUrl } | null
+}
+
+function fromJsonLd($) {
+  let found = null;
+  $('script[type="application/ld+json"]').each((_, el) => {
+    if (found) return;
+    let json;
+    try { json = JSON.parse($(el).contents().text()); } catch { return; }
+    const nodes = Array.isArray(json) ? json : json['@graph'] ? json['@graph'] : [json];
+    for (const n of nodes) {
+      const type = n?.['@type'];
+      const isEvent =
+        type === 'Event' || type === 'MusicEvent' ||
+        (Array.isArray(type) && type.some((t) => /Event/i.test(t)));
+      if (isEvent && n.organizer) {
+        const o = Array.isArray(n.organizer) ? n.organizer[0] : n.organizer;
+        if (o && (o.name || o.url)) {
+          found = {
+            organizerName: o.name ? String(o.name).trim() : null,
+            organizerUrl: absoluteUrl(o.url) || null,
+            organizerShotgunId: orgIdFromUrl(o.url),
+          };
+          return;
+        }
+      }
+    }
+  });
+  return found;
+}
+
+function fromOrganizerLink($) {
+  const a = $('a[href*="/organizers/"]').first();
+  if (a.length === 0) return null;
+  const href = a.attr('href') || '';
+  const name = a.text().replace(/\s+/g, ' ').trim();
+  if (!name && !href) return null;
+  return {
+    organizerName: name || null,
+    organizerUrl: absoluteUrl(href),
+    organizerShotgunId: orgIdFromUrl(href),
+  };
+}
+
+function orgIdFromUrl(url) {
+  if (!url || typeof url !== 'string') return null;
+  const m = url.match(/\/organizers\/([^/?#]+)/);
+  return m ? m[1] : null;
+}
+
+// URL d'une fiche événement à partir de son slug (id).
+export function eventUrl(shotgunEventId) {
+  return `${config.shotgunBase}/events/${shotgunEventId}`;
+}

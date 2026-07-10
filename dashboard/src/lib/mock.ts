@@ -45,7 +45,7 @@ function build(): EventRow[] {
   const orgFirstSeen = new Map<string, number>();
 
   for (let i = 0; i < 220; i++) {
-    const offset = Math.floor(r() * 210) - 150; // -150..+60 jours
+    const offset = Math.floor(r() * 95) - 5; // -5..+90 jours (à-venir, comme Shotgun)
     const org = pick(ORGANIZERS);
     // Berlin (récente) : peu d'events, tous récents
     const city = r() < 0.12 ? CITIES[3] : pick(CITIES.slice(0, 3));
