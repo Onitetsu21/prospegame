@@ -5,12 +5,18 @@
 export const config = {
   supabaseUrl: requireEnv('SUPABASE_URL'),
   supabaseServiceKey: requireEnv('SUPABASE_SERVICE_ROLE_KEY'),
-  scrapeDelayMs: parseInt(process.env.SCRAPE_DELAY_MS || '1500', 10),
+  scrapeDelayMs: parseInt(process.env.SCRAPE_DELAY_MS || '2500', 10),
   userAgent:
     process.env.SCRAPE_USER_AGENT ||
     'ProspeGame/1.0 (veille perso; +https://github.com)',
   reportWebhookUrl: process.env.REPORT_WEBHOOK_URL || '',
   shotgunBase: process.env.SHOTGUN_BASE || 'https://shotgun.live',
+  // Horizon : ne conserver que les événements dont la date tombe dans les N
+  // prochains mois (Shotgun ne liste que l'à-venir). Vide/0 = tout garder.
+  horizonMonths: parseFloat(process.env.SCRAPE_HORIZON_MONTHS || '3'),
+  // Si "1", écrit le HTML rendu de chaque ville dans debug-<slug>.html
+  // (récupérable comme artefact GitHub Actions pour ajuster les sélecteurs).
+  debugDump: process.env.SCRAPE_DEBUG_DUMP === '1',
 };
 
 function requireEnv(name) {

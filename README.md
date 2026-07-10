@@ -89,12 +89,24 @@ dans les variables d'environnement du site Netlify.
 cd scraper
 cp ../.env.example .env     # renseigner SUPABASE_URL et SUPABASE_SERVICE_ROLE_KEY
 npm install
+npx playwright install chromium   # navigateur headless requis (voir ci-dessous)
 # charger les variables puis lancer :
 node --env-file=.env src/scrape.js     # scrape toutes les villes actives
 node --env-file=.env src/report.js     # génère le rapport (stdout / webhook)
 node --env-file=.env src/purge.js      # purge les événements > 1 an
 node --env-file=.env src/seed-demo.js  # (optionnel) données de démo en base
 ```
+
+> **Pourquoi un navigateur ?** Shotgun est protégé par le *Vercel Security Checkpoint*
+> (challenge JavaScript anti-bot) : une requête HTTP simple renvoie `429` + une page de
+> challenge. Le scraper utilise donc **Chromium via Playwright** pour exécuter le JS, franchir
+> le challenge et récupérer le HTML rendu. En CI, l'installation du navigateur est faite
+> automatiquement par le workflow (`npx playwright install --with-deps chromium`).
+>
+> `SCRAPE_HORIZON_MONTHS` (défaut **3**) limite la collecte aux événements des N prochains mois
+> (Shotgun ne liste que l'à-venir). En cas de page vide, relancer le workflow *Scrape* avec
+> l'option **debug_dump** : le HTML rendu est publié en artefact pour ajuster les sélecteurs de
+> `scraper/src/lib/shotgun.js` (seul fichier couplé à la structure du site).
 
 ### 4. Planification (GitHub Actions)
 
@@ -158,8 +170,10 @@ migrations.
 
 ## Robustesse du scraping (cf. §10)
 
+- Rendu des pages via **Chromium/Playwright** (`scraper/src/lib/browser.js`) pour franchir le
+  challenge anti-bot Vercel, avec attente active de résolution du challenge + scroll (lazy-load).
 - Tout le couplage à la structure HTML de Shotgun est **isolé dans `scraper/src/lib/shotgun.js`**
-  (3 stratégies d'extraction : JSON-LD → `__NEXT_DATA__` → fallback DOM).
+  (3 stratégies d'extraction sur le HTML rendu : JSON-LD → `__NEXT_DATA__` → fallback DOM).
 - Une page ville sans aucun événement parsé est **journalisée** dans `scrape_runs.errors`
   (pas d'échec silencieux) et le run est marqué `partial` (code de sortie ≠ 0).
 - Rate limiting configurable via `SCRAPE_DELAY_MS` (défaut 1500 ms entre requêtes).
