@@ -3,8 +3,10 @@
 // GitHub Actions et Supabase Edge Functions injectent déjà les variables).
 
 export const config = {
-  supabaseUrl: requireEnv('SUPABASE_URL'),
-  supabaseServiceKey: requireEnv('SUPABASE_SERVICE_ROLE_KEY'),
+  // On nettoie l'URL : un retour à la ligne / espace / slash final collé par
+  // erreur dans la variable casse le chemin ("Invalid path specified in request URL").
+  supabaseUrl: requireEnv('SUPABASE_URL').trim().replace(/\/+$/, ''),
+  supabaseServiceKey: requireEnv('SUPABASE_SERVICE_ROLE_KEY').trim(),
   scrapeDelayMs: parseInt(process.env.SCRAPE_DELAY_MS || '2500', 10),
   userAgent:
     process.env.SCRAPE_USER_AGENT ||
