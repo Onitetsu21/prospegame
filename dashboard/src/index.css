@@ -1,0 +1,74 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* La police Inter est chargée via <link> dans index.html. Le fallback system-ui
+   assure un rendu propre même hors-ligne / si la police ne charge pas. */
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-base text-ink font-sans antialiased;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'ss01';
+  }
+  ::selection {
+    background: rgba(45, 212, 191, 0.28);
+  }
+  /* Scrollbar discrète, dans le ton */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #263442 transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: #263442;
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: #33475a;
+    background-clip: content-box;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-card border border-line rounded-2xl shadow-card;
+  }
+  .input {
+    @apply bg-surface border border-line rounded-xl px-3 py-2 text-sm text-ink
+           placeholder:text-ink-3 outline-none transition
+           focus:border-turq-500 focus:ring-2 focus:ring-turq-500/25;
+  }
+  .btn {
+    @apply inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-medium
+           transition select-none disabled:opacity-50 disabled:pointer-events-none;
+  }
+  .btn-primary {
+    @apply btn bg-turq-500 text-base hover:bg-turq-400 shadow-glow font-semibold;
+  }
+  .btn-ghost {
+    @apply btn text-ink-2 hover:text-ink hover:bg-card-hover border border-line;
+  }
+  .pill {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium
+           border border-turq-500/25 bg-turq-500/10 text-turq-200;
+  }
+  .th {
+    @apply text-left text-xs font-semibold uppercase tracking-wider text-ink-3 px-4 py-3;
+  }
+  .td {
+    @apply px-4 py-3 text-sm text-ink-2 border-t border-line/70;
+  }
+}

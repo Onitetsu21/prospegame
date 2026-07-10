@@ -1,0 +1,27 @@
+name: Rapport de veille (hebdomadaire)
+
+# Rapport automatique (cf. §2 & §5) — SQL + templating, sans LLM.
+# Signale notamment les nouvelles villes ajoutées depuis le dernier rapport.
+on:
+  schedule:
+    - cron: '0 8 * * 1' # tous les lundis à 08h00 UTC
+  workflow_dispatch: {}
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: scraper
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci || npm install
+      - name: Generate report
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          REPORT_WEBHOOK_URL: ${{ secrets.REPORT_WEBHOOK_URL }}
+        run: npm run report

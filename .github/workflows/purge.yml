@@ -1,0 +1,25 @@
+name: Purge événements > 1 an
+
+# Purge quotidienne (cf. §8) : supprime les événements dont event_date > 1 an.
+on:
+  schedule:
+    - cron: '0 4 * * *' # tous les jours à 04h00 UTC
+  workflow_dispatch: {}
+
+jobs:
+  purge:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: scraper
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci || npm install
+      - name: Run purge
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npm run purge

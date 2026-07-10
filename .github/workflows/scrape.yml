@@ -1,0 +1,27 @@
+name: Scrape Shotgun (quotidien)
+
+# Scraping quotidien de toutes les villes actives (cf. §4 & §11).
+# Toute ville ajoutée en base est prise en compte au run suivant, sans redéploiement.
+on:
+  schedule:
+    - cron: '30 5 * * *' # tous les jours à 05h30 UTC
+  workflow_dispatch: {}   # déclenchement manuel possible
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: scraper
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci || npm install
+      - name: Run scraper
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SCRAPE_DELAY_MS: '1500'
+        run: npm run scrape
